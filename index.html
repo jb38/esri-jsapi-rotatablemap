@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8">
+  <title> - jsFiddle demo</title>
+  <link rel="stylesheet" type="text/css" href="http://js.arcgis.com/3.6/js/esri/css/esri.css">
+  <script type='text/javascript' src="http://js.arcgis.com/3.6/init.js"></script>
+  <link rel="stylesheet" type="text/css" href="http://js.arcgis.com/3.6/js/dojo/dijit/themes/claro/claro.css">
+  <style type='text/css'>
+    html, body {
+      height: 100%;
+      width: 100%;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: #FFF;
+      overflow: hidden;
+      font-family: "Trebuchet MS";
+    }
+
+    #map {
+      height: 512px;
+      width: 512px;
+      margin: 0;
+      padding: 0;
+    }
+
+    #controls {
+      margin-top: 10px;
+      padding-left: 10px;
+    }
+
+    #rotation {
+      margin-left: 5px; 
+    }
+
+    #coords, #rotation {
+      display: inline-block;    
+    }
+  </style>
+  
+  <script type='text/javascript'>
+    window.onload=function(){
+    // define the RotatebleMap class
+    define("esri/RotatableMap", [
+        "dojo/_base/declare",
+        "dojo/_base/lang",
+        "dojo/_base/event",
+        "dojo/mouse",
+        "dojo/on",
+        "dojo/dom-construct",
+        "dojo/dom-style",
+        "esri/sniff",
+        "esri/map",
+        "esri/MapNavigationManager",
+        "esri/MouseEvents",
+        "esri/TouchEvents",
+        "esri/geometry/ScreenPoint",
+        "esri/geometry/Point"
+    ], function(declare, lang, event, mouse, on, domConstruct, domStyle, has, Map, MapNavigationManager, MouseEvents, TouchEvents, ScreenPoint, Point) {
+        var PointRotate = declare(null, {
+            _K: Math.PI / 180.0, // DEGREES_TO_RADIANS
+            _rotatePoint: function(p, about, deg) {
+                /* Rotates a point (clockwise) about another by the specified number of degrees */
+                var rads   = deg * this._K,
+                    x      = p.x - about.x,
+                    y      = p.y - about.y,
+                    xprime = x * Math.cos(rads) + y * Math.sin(rads) + about.x,
+                    yprime = y * Math.cos(rads) - x * Math.sin(rads) + about.y;
+                p.setX(xprime).setY(yprime);       
+                return p;
+            }
+        });
+        
+        // map mouse events implemenation (now with more rotation)
+        var RotatableMapMouseEvents = declare([PointRotate, MouseEvents], {
+            _processEvent: function (evt) {
+                evt = event.fix(evt, evt.target);
+                var map = this.map,
+                    pos = map && map.position;
+                if (pos) {
+                    if (evt.type === "DOMMouseScroll" && has("ff") < 3) {
+                        evt.screenPoint = new ScreenPoint(window.scrollX + evt.screenX - pos.x, 
+                                                          window.scrollY + evt.screenY - pos.y);
+                    } else {
+                        evt.screenPoint = new ScreenPoint(evt.pageX - pos.x, 
+                                                          evt.pageY - pos.y);
+                    }
+                    evt.mapPoint = map.extent ? map.toMap(evt.screenPoint) : new Point();
+                    //
+                    // translate points when the map is rotated
+                    //
+                    evt.screenPoint = this._rotatePoint(evt.screenPoint, 
+                                                        map.toScreen(map.extent.getCenter()), 
+                                                        map.rotation || 0);
+                    evt.mapPoint = this._rotatePoint(evt.mapPoint, 
+                                                     map.extent.getCenter(), 
+                                                     map.rotation || 0);
+                }
+                evt.numPoints = 0;
+                return evt;
+            }
+        });
+        
+        var RotatableMapTouchEvents = declare([PointRotate, TouchEvents], {
+            _processTouchEvent: function (evt, touches) {
+                var map = this.map,
+                    pos = map && map.position,
+                    count = 0;
+                if (pos && touches) {
+                    if (lang.isArray(touches)) {
+                        var i, point, mapPoint;
+                        evt.screenPoints = [];
+                        evt.mapPoints = [];
+                        for (i = 0; i < touches.length; i++) {
+                            if (touches[i]) {
+                                point = new ScreenPoint(touches[i].pageX - pos.x, touches[i].pageY - pos.y);
+                                mapPoint = map.extent ? map.toMap(point) : new Point();
+                                //
+                                // translate points when the map is rotated
+                                //
+                                point = this._rotatePoint(point, 
+                                                          map.toScreen(map.extent.getCenter()), 
+                                                          map.rotation || 0);
+                                mapPoint = this._rotatePoint(mapPoint, 
+                                                             map.extent.getCenter(), 
+                                                             map.rotation || 0);
+                                
+                                evt.screenPoints.push(point);
+                                evt.mapPoints.push(map.extent ? mapPoint : new Point());
+                            } else {
+                                count++;
+                            }
+                        }
+                    } else {
+                        evt.screenPoint = new ScreenPoint(touches.pageX - pos.x, touches.pageY - pos.y);
+                        evt.mapPoint = map.extent ? map.toMap(evt.screenPoint) : new Point();
+                        //
+                        // translate points when the map is rotated
+                        //
+                        evt.screenPoint = this._rotatePoint(evt.screenPoint, 
+                                                            map.toScreen(map.extent.getCenter()), 
+                                                            map.rotation || 0);
+                        evt.mapPoint = this._rotatePoint(evt.mapPoint, 
+                                                         map.extent.getCenter(), 
+                                                         map.rotation || 0);
+                    }
+                }
+                evt.numPoints = touches ? (lang.isArray(touches) ? (touches.length - count) : 1) : 0;
+                return evt;
+            },
+            _processMouseEvent: function (evt) {
+                var map = this.map,
+                    pos = map && map.position;
+                if (pos) {
+                    evt.screenPoint = new ScreenPoint(evt.pageX - pos.x, evt.pageY - pos.y);
+                    evt.mapPoint = map.extent ? map.toMap(evt.screenPoint) : new Point();
+                    //
+                    // translate points when the map is rotated
+                    //
+                    evt.screenPoint = this._rotatePoint(evt.screenPoint, 
+                                                        map.toScreen(map.extent.getCenter()), 
+                                                        map.rotation || 0);
+                    evt.mapPoint = this._rotatePoint(evt.mapPoint, 
+                                                     map.extent.getCenter(), 
+                                                     map.rotation || 0);
+                }
+                return evt;
+            }    
+        });
+        
+        // map navigation manager implemenation (now with more rotation)
+        var RotatableMapNavigationManager = declare(MapNavigationManager, {
+            constructor: function() {
+                /* Chained ctor */
+                // destroy the factory implementation and replace it with our new one.
+                if (this.mouseEvents) {
+                    this.mouseEvents.destroy();
+                    this.mouseEvents = new RotatableMapMouseEvents(this.map.__container, {
+                        map: this.map 
+                    });
+                }
+                if (this.touchEvents) {
+                    this.touchEvents.destroy();
+                    this.touchEvents = new RotatableMapTouchEvents(this.map.__container, {
+                        map: this.map 
+                    });
+                }
+            }
+        });
+        
+        // map implemenation (now with more rotation)
+        var RotatableMap = declare(Map, {
+            rotation: 0,
+            constructor: function() {
+                /* Chained ctor */
+                // override the navigation manager (shift+drag box drawing enhancements)
+                this.navigationManager = new RotatableMapNavigationManager(this);
+            },
+            onLoad: function() {
+                /* Latches a delayed event to fix the slider */
+                this.inherited(arguments);
+                window.setTimeout(lang.hitch(this, this._fixSlider), 500);
+            },
+            setRotation: function(rotation) {
+                /* Sets the rotation value for the instance */
+                // compensate for negative/super-positive rotation
+                // this is to keep the range of this.rotation in the domain of [0, 360)
+                if (rotation < 0) {
+                    rotation += 360 * (Math.floor(Math.abs(rotation) / 360.0) + 1);   
+                }
+                rotation %= 360;
+                // capture event details
+                var rotationChanged = (this.rotation !== rotation);
+                var delta = rotation - this.rotation;
+                // update the instance property value
+                this.rotation = rotation;
+                // css magic
+                domStyle.set(this.root, "transform",         "rotate(" + rotation + "deg)");
+                domStyle.set(this.root, "-ms-transform",     "rotate(" + rotation + "deg)");
+                domStyle.set(this.root, "-webkit-transform", "rotate(" + rotation + "deg)");
+                // emit the event, if necessary
+                if (rotationChanged) {
+                    on.emit(this, "rotation-change", {
+                        rotation: this.rotation,
+                        delta:    delta
+                    });
+                }
+            },
+            _fixSlider: function() {
+                /* Move the heritage of the ${id}_zoom_slider div up one generation */
+                domConstruct.place(this._slider, this._slider.parentNode.parentNode);
+                var pos = this.position;
+                domStyle.set(this._slider, "left", (pos.x + 20) + "px");
+                domStyle.set(this._slider, "top", (pos.y + 20) + "px");
+            }
+        });
+        
+        return RotatableMap;
+    });
+    
+    // use the RotatableMap class
+    require([
+        "dojo/_base/window", 
+        "dojo/_base/lang",
+        "dojo/on", 
+        "dojo/dom",
+        "dojo/dom-class", 
+        "esri/RotatableMap",
+        "dijit/form/HorizontalSlider",
+        "dojo/domReady!"
+    ], function (win, lang, on, dom, domClass, RotatableMap, HorizontalSlider) {
+        // claro /kle(ə)rō/ adjective: clear, light, plain, apparent, evident, bright, distinct
+        domClass.add(win.body(), "claro");
+        
+        // the map instance
+        var map = new RotatableMap("map", {
+            basemap: "topo",
+            center: [-77.247581, 38.928063], // long, lat
+            zoom: 17,
+            sliderStyle: "small"
+        });
+        
+        // evidence of listening to events normally (with cooked properties)
+        var coordsDiv = dom.byId("coords");
+        on(map, "mouse-move", function(e) {
+            coordsDiv.innerHTML = e.mapPoint.x + ", " + e.mapPoint.y;
+        });
+        on(map, "mouse-out", function(e) {
+            coordsDiv.innerHTML = "move the mouse over the map";
+        });
+        var rotationDiv = dom.byId("rotation");
+        on(map, "rotation-change", function(e) {
+           rotationDiv.innerHTML =  e.rotation;
+        });
+        
+        // control to cause rotation in the map
+        var slider = new HorizontalSlider({
+            value: 0,
+            minimum: 0,
+            maximum: 360,
+            intermediateChanges: true,
+            discreteValues: 65,
+            style: "width:400px; display: inline-block;"
+        }, "slider");
+        on(slider, "change", function (value) {
+            map.setRotation(Math.floor(value));
+        });
+    });
+  </script>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="controls">
+    <div>Rotation: <div id="slider"></div><div id="rotation">0</div></div>
+    <div>Coords: <div id="coords">move the mouse over the map</div></div>
+  </div>
+</body>
+</html>
